@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import sqlite3
-import json
 import datetime
 import re
 import streamlit.components.v1 as components
@@ -16,52 +15,82 @@ cursor = conn.cursor()
 def init_db():
     cursor.execute('''CREATE TABLE IF NOT EXISTS exams 
                       (id TEXT PRIMARY KEY, course_code TEXT, exam_data TEXT, status TEXT, last_updated TEXT)''')
-    cursor.execute('''CREATE TABLE IF NOT EXISTS co_po_matrix 
-                      (course_code TEXT, mapping_data TEXT)''')
     conn.commit()
 
 init_db()
 
-# --- 3. LOAD BLOOM'S TAXONOMY ---
+# --- 3. FOOLPROOF BLOOM'S TAXONOMY PARSER ---
 @st.cache_data
 def load_blooms_taxonomy():
     try:
         df = pd.read_csv('blooms taxonomy.xlsx - Sheet1.csv')
-        return dict(zip(df['Verb'].astype(str).str.lower().str.strip(), df['Level'].astype(str).str.strip()))
+        level_map = {
+            'Remembering': 'L1', 'Understanding': 'L2', 'Applying': 'L3',
+            'Analyzing': 'L4', 'Evaluating': 'L5', 'Creating': 'L6'
+        }
+        verb_dict = {}
+        for index, row in df.iterrows():
+            level_name = row['Level'].strip()
+            l_code = level_map.get(level_name, 'L1')
+            verbs_string = row['Key Action Verbs (exhaustive list, engineering-relevant emphasis)']
+            if pd.notna(verbs_string):
+                verbs_list = [v.strip().lower() for v in verbs_string.split(',')]
+                for verb in verbs_list:
+                    verb_dict[verb] = l_code
+        return verb_dict
     except Exception as e:
-        return {"define": "L1", "explain": "L2", "determine": "L3", "derive": "L3", "calculate": "L3", "discuss": "L2", "construct": "L4", "demonstrate": "L3"}
+        st.error(f"Error loading Bloom's CSV: {e}")
+        return {"define": "L1", "explain": "L2", "calculate": "L3", "design": "L6"}
 
 blooms_dict = load_blooms_taxonomy()
 
-# --- 4. MOCK SYLLABUS MAPPING (For 1BESC104C) ---
-syllabus_keywords_to_co = {
-    "diode": "CO1", "rectifier": "CO1", "bjt": "CO1", "amplifier": "CO1", "oscillator": "CO1",
-    "number system": "CO2", "logic circuits": "CO2", "gates": "CO2", "communication": "CO2", "modulation": "CO2",
-    "op-amp": "CO3", "operational amplifier": "CO3", "ripple factor": "CO3", "zener": "CO3",
-    "boolean": "CO4", "digital electronics": "CO4",
-    "develop": "CO5", "sensors": "CO5", "embedded": "CO5"
+# --- 4. ADVANCED 2D SYLLABUS MAPPING ENGINE ---
+# Maps Keyword -> {Bloom's Level -> Specific CO}
+advanced_syllabus_mapping = {
+    # Analog/Hardware Topics
+    "rectifier":  {"L1": "CO1", "L2": "CO1", "L3": "CO3", "L4": "CO3", "L5": "CO3", "L6": "CO3"},
+    "diode":      {"L1": "CO1", "L2": "CO1", "L3": "CO3", "L4": "CO3", "L5": "CO3", "L6": "CO3"},
+    "amplifier":  {"L1": "CO1", "L2": "CO1", "L3": "CO3", "L4": "CO3", "L5": "CO3", "L6": "CO3"},
+    "op-amp":     {"L1": "CO1", "L2": "CO1", "L3": "CO3", "L4": "CO3", "L5": "CO3", "L6": "CO3"},
+    "oscillator": {"L1": "CO1", "L2": "CO1", "L3": "CO3", "L4": "CO3", "L5": "CO3", "L6": "CO3"},
+    "filter":     {"L1": "CO1", "L2": "CO1", "L3": "CO3", "L4": "CO3", "L5": "CO3", "L6": "CO3"},
+    
+    # Digital/Communication Topics
+    "number system": {"L1": "CO2", "L2": "CO2", "L3": "CO4", "L4": "CO4", "L5": "CO4", "L6": "CO4"},
+    "logic circuit": {"L1": "CO2", "L2": "CO2", "L3": "CO4", "L4": "CO4", "L5": "CO4", "L6": "CO4"},
+    "boolean":       {"L1": "CO2", "L2": "CO2", "L3": "CO4", "L4": "CO4", "L5": "CO4", "L6": "CO4"},
+    "gates":         {"L1": "CO2", "L2": "CO2", "L3": "CO4", "L4": "CO4", "L5": "CO4", "L6": "CO4"},
+    "communication": {"L1": "CO2", "L2": "CO2", "L3": "CO4", "L4": "CO4", "L5": "CO4", "L6": "CO4"},
+    
+    # System Level / Culminating Topics
+    "develop":  {"L1": "CO5", "L2": "CO5", "L3": "CO5", "L4": "CO5", "L5": "CO5", "L6": "CO5"},
+    "sensors":  {"L1": "CO5", "L2": "CO5", "L3": "CO5", "L4": "CO5", "L5": "CO5", "L6": "CO5"},
+    "embedded": {"L1": "CO5", "L2": "CO5", "L3": "CO5", "L4": "CO5", "L5": "CO5", "L6": "CO5"}
 }
 
 def auto_tag_question(text):
     if not text: return "L1", "CO1"
     
     suggested_lvl = "L1"
-    words = re.findall(r'\b[a-zA-Z]+\b', text.lower())
+    suggested_co = "CO1"
+    text_lower = text.lower()
+    
+    # 1. FIND BLOOM'S LEVEL FIRST
+    words = re.findall(r'\b[a-zA-Z-]+\b', text_lower)
     for word in words[:7]: 
         if word in blooms_dict:
             suggested_lvl = blooms_dict[word]
             break
             
-    suggested_co = "CO1"
-    text_lower = text.lower()
-    for keyword, co in syllabus_keywords_to_co.items():
-        if keyword in text_lower:
-            suggested_co = co
-            break
+    # 2. CROSS-REFERENCE TOPIC AND BLOOM'S LEVEL FOR CO
+    for keyword, level_rules in advanced_syllabus_mapping.items():
+        if re.search(r'\b' + re.escape(keyword) + r'\b', text_lower):
+            suggested_co = level_rules.get(suggested_lvl, "CO1")
+            break 
             
     return suggested_lvl, suggested_co
 
-# --- HTML GENERATOR (RESTORED) ---
+# --- HTML GENERATOR ---
 def generate_html():
     html = f"""
     <div style="font-family: Arial, sans-serif; padding: 20px; border: 1px solid #ccc; max-width: 800px; margin: auto; background-color: white;">
@@ -116,19 +145,6 @@ if 'sections' not in st.session_state:
         ]}
     ]
 
-if 'co_po_df' not in st.session_state:
-    cols = [f"PO{i}" for i in range(1, 13)]
-    default_data = [
-        ["2", "", "", "", "", "", "", "", "", "", "", ""], 
-        ["2", "", "", "", "", "", "", "", "", "", "", ""], 
-        ["3", "", "", "", "", "", "", "", "", "", "", ""], 
-        ["3", "", "", "", "", "", "", "", "", "", "", ""], 
-        ["3", "", "2", "", "1", "", "", "", "3", "1", "", ""]  
-    ]
-    df = pd.DataFrame(default_data, index=[f"CO{i}" for i in range(1, 6)], columns=cols)
-    df.loc["CO6"] = [""] * 12
-    st.session_state.co_po_df = df
-
 def add_section():
     new_id = int(datetime.datetime.now().timestamp() * 1000)
     st.session_state.sections.append({
@@ -148,7 +164,7 @@ def update_tags(q_id, sec_idx, q_idx):
     st.session_state.sections[sec_idx]['questions'][q_idx]['co'] = new_co
 
 # --- 6. MAIN UI ---
-st.title("📋 Exam Dashboard (Live Preview Restored)")
+st.title("📋 Exam Dashboard Workspace")
 
 col_edit, col_view = st.columns([1.2, 1], gap="large")
 
@@ -163,10 +179,8 @@ with col_edit:
         st.session_state.exam_details['maxMarks'] = col1.number_input("Max Marks", value=int(st.session_state.exam_details['maxMarks']))
         st.session_state.exam_details['duration'] = col2.text_input("Duration", st.session_state.exam_details['duration'])
 
-    with st.expander("🔗 2. Corrected CO-PO Matrix", expanded=False):
-        st.data_editor(st.session_state.co_po_df, use_container_width=True)
-
     st.divider()
+    st.info("💡 **Magic Test:** Edit Question 2.a. Change 'Determine' to 'Explain'. Press `Ctrl+Enter` and watch the CO dynamically shift from CO3 to CO1 based on the 2D Engine!")
 
     for i, section in enumerate(st.session_state.sections):
         st.markdown(f"**Block {i+1}**")
@@ -177,7 +191,7 @@ with col_edit:
                     q['qNo'] = c_no.text_input("Q No.", q['qNo'], key=f"qn_{q['id']}")
                     
                     # Interactivity Trigger
-                    c_txt.text_area("Question Text (Ctrl+Enter to update tags)", q['text'], key=f"qt_{q['id']}", 
+                    c_txt.text_area("Question Text (Ctrl+Enter to auto-tag)", q['text'], key=f"qt_{q['id']}", 
                                     on_change=update_tags, args=(q['id'], i, j))
                     
                     c_mk, c_co, c_lvl = st.columns([2, 2, 2])
@@ -211,7 +225,6 @@ with col_view:
         c2.metric("L3 (Target 30-40%)", f"{p_l3:.1f}%")
         c3.metric("L4-L6 (Target 30-50%)", f"{p_l456:.1f}%")
         
-    # --- PREVIEW RESTORED HERE ---
     st.divider()
     st.header("👁️ Live Document Preview")
     

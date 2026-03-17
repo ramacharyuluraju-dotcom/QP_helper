@@ -167,12 +167,14 @@ with col_edit:
                     c_mk, c_co, c_lvl = st.columns([2, 2, 2])
                     q['marks'] = c_mk.number_input("Marks", value=float(q['marks']), step=1.0, key=f"mk_{q['id']}")
                     
-                    # CO Selectbox
-                    if f"co_{q_id}" not in st.session_state: st.session_state[f"co_{q['id']}"] = q.get('co', 'CO1')
+                    # CO Selectbox (FIXED)
+                    if f"co_{q['id']}" not in st.session_state: 
+                        st.session_state[f"co_{q['id']}"] = q.get('co', 'CO1')
                     q['co'] = c_co.selectbox("CO", ["CO1", "CO2", "CO3", "CO4", "CO5", "CO6"], key=f"co_{q['id']}")
                     
-                    # Bloom's Selectbox
-                    if f"lv_{q['id']}" not in st.session_state: st.session_state[f"lv_{q['id']}"] = q.get('level', 'L1')
+                    # Bloom's Selectbox (FIXED)
+                    if f"lv_{q['id']}" not in st.session_state: 
+                        st.session_state[f"lv_{q['id']}"] = q.get('level', 'L1')
                     q['level'] = c_lvl.selectbox("Bloom's", ["L1", "L2", "L3", "L4", "L5", "L6"], key=f"lv_{q['id']}")
 
     st.button("➕ Add Question", on_click=add_section)

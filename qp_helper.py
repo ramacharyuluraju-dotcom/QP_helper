@@ -19,28 +19,26 @@ def init_db():
 
 init_db()
 
-# --- 3. FOOLPROOF BLOOM'S TAXONOMY PARSER ---
+# --- 3. HARDCODED BLOOM'S TAXONOMY ENGINE ---
+# We have removed the CSV dependency and hardcoded your exhaustive list directly.
 @st.cache_data
 def load_blooms_taxonomy():
-    try:
-        df = pd.read_csv('blooms taxonomy.xlsx - Sheet1.csv')
-        level_map = {
-            'Remembering': 'L1', 'Understanding': 'L2', 'Applying': 'L3',
-            'Analyzing': 'L4', 'Evaluating': 'L5', 'Creating': 'L6'
-        }
-        verb_dict = {}
-        for index, row in df.iterrows():
-            level_name = row['Level'].strip()
-            l_code = level_map.get(level_name, 'L1')
-            verbs_string = row['Key Action Verbs (exhaustive list, engineering-relevant emphasis)']
-            if pd.notna(verbs_string):
-                verbs_list = [v.strip().lower() for v in verbs_string.split(',')]
-                for verb in verbs_list:
-                    verb_dict[verb] = l_code
-        return verb_dict
-    except Exception as e:
-        st.error(f"Error loading Bloom's CSV: {e}")
-        return {"define": "L1", "explain": "L2", "calculate": "L3", "design": "L6"}
+    blooms_data = {
+        "L1": ["arrange", "cite", "define", "describe", "duplicate", "enumerate", "identify", "label", "list", "match", "memorize", "name", "order", "outline", "recall", "recognize", "record", "relate", "repeat", "reproduce", "select", "state", "tabulate", "tell"],
+        "L2": ["approximate", "articulate", "categorize", "characterize", "clarify", "classify", "compare", "comprehend", "conclude", "contrast", "convert", "defend", "demonstrate", "discuss", "distinguish", "estimate", "explain", "express", "extend", "generalize", "illustrate", "indicate", "infer", "interpret", "locate", "paraphrase", "predict", "rephrase", "report", "restate", "review", "rewrite", "show", "summarize", "translate"],
+        "L3": ["adapt", "allocate", "apply", "build", "calculate", "change", "choose", "compute", "conduct", "construct", "develop", "discover", "employ", "execute", "experiment", "function", "implement", "interview", "manipulate", "model", "modify", "operate", "practice", "produce", "schedule", "sketch", "solve", "use"],
+        "L4": ["analyze", "appraise", "breakdown", "categorize", "classify", "compare", "conclude", "contrast", "criticize", "deduce", "derive", "differentiate", "discriminate", "distinguish", "examine", "experiment", "infer", "inspect", "inventory", "investigate", "model", "organize", "outline", "prioritize", "question", "relate", "separate", "simplify", "subdivide", "survey", "test"],
+        "L5": ["agree", "appraise", "argue", "assess", "award", "choose", "compare", "conclude", "critique", "criticize", "decide", "deduct", "defend", "determine", "discriminate", "disprove", "estimate", "evaluate", "explain", "grade", "influence", "interpret", "judge", "justify", "mark", "measure", "perceive", "predict", "prioritize", "prove", "rate", "recommend", "score", "select", "support", "test", "validate", "value", "verify"],
+        "L6": ["adapt", "arrange", "assemble", "build", "change", "combine", "compile", "compose", "construct", "create", "delete", "design", "develop", "devise", "elaborate", "estimate", "formulate", "generate", "imagine", "improve", "invent", "manage", "maximize", "minimize", "modify", "optimize", "organize", "originate", "plan", "predict", "prepare", "produce", "propose", "reconstruct", "revise", "rewrite", "synthesize"]
+    }
+    
+    verb_dict = {}
+    for level, verbs in blooms_data.items():
+        for verb in verbs:
+            # Storing every verb with its mapped level
+            verb_dict[verb.lower()] = level
+            
+    return verb_dict
 
 blooms_dict = load_blooms_taxonomy()
 

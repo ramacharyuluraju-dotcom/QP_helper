@@ -9,9 +9,8 @@ import streamlit.components.v1 as components
 # --- 1. CONFIGURATION ---
 st.set_page_config(page_title="AMC Exam Portal Pro", layout="wide", page_icon="🎓")
 
-# --- 2. LOCAL DB SETUP (For saving templates/mappings) ---
-# Note: On Streamlit Cloud, SQLite is ephemeral (resets on reboot). 
-# It works perfectly for temporary session saves or local offline use.
+# --- 2. LOCAL DB SETUP ---
+# Initializes SQLite database for saving mappings offline
 conn = sqlite3.connect('amc_exams_local.db', check_same_thread=False)
 cursor = conn.cursor()
 
@@ -28,19 +27,18 @@ init_db()
 @st.cache_data
 def load_blooms_taxonomy():
     try:
-        # Ensure the CSV file is in the same directory
+        # Assumes the CSV is in the same directory as app.py
         df = pd.read_csv('blooms taxonomy.xlsx - Sheet1.csv')
-        # Map verbs to levels. Assumes columns are named 'Verb' and 'Level'
         return dict(zip(df['Verb'].astype(str).str.lower().str.strip(), df['Level'].astype(str).str.strip()))
     except Exception as e:
-        return {} # Fallback to empty dict if file is missing
+        return {} # Fallback to empty if missing
 
 blooms_dict = load_blooms_taxonomy()
 
 def suggest_bloom_level(text):
     if not text: return "L1"
     words = re.findall(r'\b\w+\b', text.lower())
-    for word in words[:5]: # Scan first few words for action verbs
+    for word in words[:5]: # Scan the first few words for verbs
         if word in blooms_dict:
             return blooms_dict[word]
     return "L1"
@@ -51,7 +49,6 @@ if 'exam_details' not in st.session_state:
 if 'sections' not in st.session_state:
     st.session_state.sections = [{'id': 1, 'isNote': False, 'questions': [{'id': 101, 'qNo': '1.a', 'text': '', 'marks': 10, 'co': 'CO1', 'level': 'L1'}]}]
 
-# Helper to add a question block
 def add_section():
     new_id = int(datetime.datetime.now().timestamp() * 1000)
     st.session_state.sections.append({
@@ -80,7 +77,6 @@ def calculate_metrics():
     return total_marks, blooms_marks, co_marks
 
 def generate_html():
-    # A simplified HTML generator based on standard QP formats
     html = f"""
     <div style="font-family: Arial, sans-serif; padding: 20px; border: 1px solid #ccc; max-width: 800px; margin: auto; background-color: white;">
         <h3 style="text-align: center; margin-bottom: 5px;">{st.session_state.exam_details['institution']}</h3>
@@ -102,7 +98,8 @@ def generate_html():
         if not sec.get('isNote'):
             for q in sec['questions']:
                 if q['text'].strip().upper() == 'OR':
-                    html += f"<tr><td colspan='5' style="text-align: center; font-weight: bold; padding: 10px;">--- OR ---</td></tr>"
+                    # Syntax error fixed here: uses single quotes inside the style tags
+                    html += f"<tr><td colspan='5' style='text-align: center; font-weight: bold; padding: 10px;'>--- OR ---</td></tr>"
                 else:
                     html += f"""
                     <tr>

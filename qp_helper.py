@@ -10,7 +10,6 @@ import streamlit.components.v1 as components
 st.set_page_config(page_title="AMC Exam Portal Pro", layout="wide", page_icon="🎓")
 
 # --- 2. LOCAL DB SETUP ---
-# Initializes SQLite database for saving mappings offline
 conn = sqlite3.connect('amc_exams_local.db', check_same_thread=False)
 cursor = conn.cursor()
 
@@ -19,6 +18,8 @@ def init_db():
                       (id TEXT PRIMARY KEY, course_code TEXT, exam_data TEXT, status TEXT, last_updated TEXT)''')
     cursor.execute('''CREATE TABLE IF NOT EXISTS syllabus 
                       (course_code TEXT, topic TEXT, mapped_co TEXT)''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS co_po_matrix 
+                      (course_code TEXT, mapping_data TEXT)''') # Added for CO-PO saving
     conn.commit()
 
 init_db()
@@ -27,27 +28,32 @@ init_db()
 @st.cache_data
 def load_blooms_taxonomy():
     try:
-        # Assumes the CSV is in the same directory as app.py
         df = pd.read_csv('blooms taxonomy.xlsx - Sheet1.csv')
+        # Ensure fast lookup of verbs
         return dict(zip(df['Verb'].astype(str).str.lower().str.strip(), df['Level'].astype(str).str.strip()))
     except Exception as e:
-        return {} # Fallback to empty if missing
+        return {} 
 
 blooms_dict = load_blooms_taxonomy()
 
 def suggest_bloom_level(text):
     if not text: return "L1"
-    words = re.findall(r'\b\w+\b', text.lower())
-    for word in words[:5]: # Scan the first few words for verbs
+    # Find all words, convert to lowercase to match the dictionary
+    words = re.findall(r'\b[a-zA-Z]+\b', text.lower())
+    for word in words[:7]: # Scan the first 7 words for action verbs (e.g., "calculate", "design")
         if word in blooms_dict:
             return blooms_dict[word]
-    return "L1"
+    return "L1" # Default if no keyword is found
 
-# --- 4. STATE MANAGEMENT ---
+# --- 4. STATE MANAGEMENT & CALLBACKS ---
 if 'exam_details' not in st.session_state:
     st.session_state.exam_details = {'institution': 'AMC Engineering College', 'courseCode': 'CS501', 'courseName': 'Software Engineering', 'maxMarks': 50, 'duration': '3 Hours'}
 if 'sections' not in st.session_state:
     st.session_state.sections = [{'id': 1, 'isNote': False, 'questions': [{'id': 101, 'qNo': '1.a', 'text': '', 'marks': 10, 'co': 'CO1', 'level': 'L1'}]}]
+if 'co_po_df' not in st.session_state:
+    # Initialize a blank 6x12 grid for CO-PO mapping
+    cols = [f"PO{i}" for i in range(1, 13)]
+    st.session_state.co_po_df = pd.DataFrame(index=[f"CO{i}" for i in range(1, 7)], columns=cols).fillna("")
 
 def add_section():
     new_id = int(datetime.datetime.now().timestamp() * 1000)
@@ -56,6 +62,20 @@ def add_section():
         'isNote': False, 
         'questions': [{'id': new_id + 1, 'qNo': '', 'text': '', 'marks': 0, 'co': 'CO1', 'level': 'L1'}]
     })
+
+# --- CALLBACK TO FORCE BLOOM'S UPDATE ---
+def update_bloom(q_id, sec_idx, q_idx):
+    # Fetch what the user just typed
+    typed_text = st.session_state[f"qt_{q_id}"]
+    # Guess the level
+    new_level = suggest_bloom_level(typed_text)
+    
+    # Force the selectbox widget to update
+    st.session_state[f"lv_{q_id}"] = new_level
+    
+    # Save text and level back to our main data structure
+    st.session_state.sections[sec_idx]['questions'][q_idx]['text'] = typed_text
+    st.session_state.sections[sec_idx]['questions'][q_idx]['level'] = new_level
 
 # --- 5. DASHBOARD & HTML LOGIC ---
 def calculate_metrics():
@@ -98,7 +118,6 @@ def generate_html():
         if not sec.get('isNote'):
             for q in sec['questions']:
                 if q['text'].strip().upper() == 'OR':
-                    # Syntax error fixed here: uses single quotes inside the style tags
                     html += f"<tr><td colspan='5' style='text-align: center; font-weight: bold; padding: 10px;'>--- OR ---</td></tr>"
                 else:
                     html += f"""
@@ -120,9 +139,10 @@ col_edit, col_view = st.columns([1.2, 1], gap="large")
 
 # === LEFT COLUMN: EDITOR ===
 with col_edit:
-    st.header("📝 Question Editor")
+    st.header("📝 Configuration & Editor")
     
-    with st.expander("Header Details", expanded=False):
+    # 1. Header Details
+    with st.expander("📝 1. Header Details", expanded=False):
         st.session_state.exam_details['institution'] = st.text_input("Institution", st.session_state.exam_details['institution'])
         col1, col2 = st.columns(2)
         st.session_state.exam_details['courseCode'] = col1.text_input("Course Code", st.session_state.exam_details['courseCode'])
@@ -130,29 +150,47 @@ with col_edit:
         st.session_state.exam_details['maxMarks'] = col1.number_input("Max Marks", value=int(st.session_state.exam_details['maxMarks']))
         st.session_state.exam_details['duration'] = col2.text_input("Duration", st.session_state.exam_details['duration'])
 
-    st.divider()
+    # 2. CO-PO Mapping Matrix
+    with st.expander("🔗 2. CO-PO Mapping Matrix", expanded=False):
+        st.write("Fill in the correlation levels (e.g., 1, 2, 3) for Course Outcomes vs Program Outcomes.")
+        edited_df = st.data_editor(st.session_state.co_po_df, use_container_width=True)
+        
+        if st.button("💾 Save CO-PO Mapping"):
+            st.session_state.co_po_df = edited_df
+            # Save to SQLite database as a JSON string
+            json_mapping = edited_df.to_json()
+            cursor.execute("REPLACE INTO co_po_matrix (course_code, mapping_data) VALUES (?, ?)", 
+                           (st.session_state.exam_details['courseCode'], json_mapping))
+            conn.commit()
+            st.success("Mapping successfully saved to database!")
 
-    # Dynamic Question Blocks
+    st.divider()
+    st.subheader("Question Paper Blocks")
+
+    # 3. Dynamic Question Blocks
     for i, section in enumerate(st.session_state.sections):
-        st.markdown(f"**Question Block {i+1}**")
+        st.markdown(f"**Block {i+1}**")
         if not section.get('isNote'):
             for j, q in enumerate(section['questions']):
                 with st.container(border=True):
                     c_no, c_txt = st.columns([1, 5])
                     q['qNo'] = c_no.text_input("Q No.", q['qNo'], key=f"qn_{q['id']}")
-                    q['text'] = c_txt.text_area("Question Text", q['text'], key=f"qt_{q['id']}")
                     
-                    # Smart Tagging Execution
-                    suggested_lvl = suggest_bloom_level(q['text'])
+                    # Notice the on_change callback here! This triggers the Bloom's auto-fill
+                    c_txt.text_area("Question Text", q['text'], key=f"qt_{q['id']}", 
+                                    on_change=update_bloom, args=(q['id'], i, j))
                     
                     c_mk, c_co, c_lvl = st.columns([2, 2, 2])
                     q['marks'] = c_mk.number_input("Marks", value=float(q['marks']), step=1.0, key=f"mk_{q['id']}")
-                    q['co'] = c_co.selectbox("CO", ["CO1", "CO2", "CO3", "CO4", "CO5", "CO6"], index=int(q['co'][-1])-1 if q['co'] and q['co'][-1].isdigit() else 0, key=f"co_{q['id']}")
+                    q['co'] = c_co.selectbox("CO", ["CO1", "CO2", "CO3", "CO4", "CO5", "CO6"], 
+                                             index=int(q['co'][-1])-1 if q['co'] and q['co'][-1].isdigit() else 0, key=f"co_{q['id']}")
                     
-                    # Set Selectbox default to the suggested level
+                    # The widget is now controlled by session_state based on the callback
                     b_opts = ["L1", "L2", "L3", "L4", "L5", "L6"]
-                    b_index = b_opts.index(suggested_lvl) if suggested_lvl in b_opts else 0
-                    q['level'] = c_lvl.selectbox("Bloom's", b_opts, index=b_index, key=f"lv_{q['id']}")
+                    if f"lv_{q['id']}" not in st.session_state:
+                        st.session_state[f"lv_{q['id']}"] = q.get('level', 'L1')
+                        
+                    q['level'] = c_lvl.selectbox("Bloom's", b_opts, key=f"lv_{q['id']}")
 
     st.button("➕ Add Question Block", on_click=add_section)
 

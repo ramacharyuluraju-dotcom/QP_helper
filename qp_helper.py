@@ -79,7 +79,7 @@ def auto_tag_question(text):
             
     return suggested_lvl, suggested_co
 
-# --- HTML GENERATOR ---
+# --- HTML GENERATOR (FIXED MODULE GROUPING) ---
 def generate_html():
     html = f"""
     <div style="font-family: Arial, sans-serif; padding: 20px; border: 1px solid #ccc; max-width: 800px; margin: auto; background-color: white;">
@@ -98,11 +98,18 @@ def generate_html():
                 <th style="border: 1px solid #000; padding: 5px; width: 10%;">Bloom's</th>
             </tr>
     """
+    
+    # We keep track of the last module printed so we don't repeat the header
+    last_printed_module = None
+    
     for sec in st.session_state.sections:
         if not sec.get('isNote'):
-            # ADDING THE MODULE HEADER ROW
-            mod_name = sec.get('module', 'Module')
-            html += f"<tr><td colspan='5' style='text-align: center; font-weight: bold; padding: 8px; background-color: #f0f2f6; border: 1px solid #000;'>--- {mod_name.upper()} ---</td></tr>"
+            current_module = sec.get('module', 'Module 1')
+            
+            # ONLY print the header if the module has changed!
+            if current_module != last_printed_module:
+                html += f"<tr><td colspan='5' style='text-align: center; font-weight: bold; padding: 8px; background-color: #f0f2f6; border: 1px solid #000;'>--- {current_module.upper()} ---</td></tr>"
+                last_printed_module = current_module
             
             for q in sec['questions']:
                 if q['text'].strip().upper() == 'OR':
@@ -128,7 +135,6 @@ if 'exam_details' not in st.session_state:
     }
 
 if 'sections' not in st.session_state:
-    # Added 'module' tracking to each block
     st.session_state.sections = [
         {'id': 100, 'module': 'Module 1', 'isNote': False, 'questions': [
             {'id': 101, 'qNo': '1.a', 'text': 'Define PN junction diode and its characteristics.', 'marks': 5, 'co': 'CO1', 'level': 'L1'},
@@ -141,7 +147,6 @@ if 'sections' not in st.session_state:
 
 def add_section():
     new_id = int(datetime.datetime.now().timestamp() * 1000)
-    # Smart module increment (If previous was Module 2, default this to Module 3)
     current_modules = len(st.session_state.sections)
     next_mod_num = current_modules + 1 if current_modules < 5 else 5
     
@@ -160,6 +165,12 @@ def update_tags(q_id, sec_idx, q_idx):
     st.session_state.sections[sec_idx]['questions'][q_idx]['text'] = typed_text
     st.session_state.sections[sec_idx]['questions'][q_idx]['level'] = new_level
     st.session_state.sections[sec_idx]['questions'][q_idx]['co'] = new_co
+
+def add_sub_question(sec_idx):
+    new_id = int(datetime.datetime.now().timestamp() * 1000)
+    st.session_state.sections[sec_idx]['questions'].append({
+        'id': new_id, 'qNo': '', 'text': '', 'marks': 0, 'co': 'CO1', 'level': 'L1'
+    })
 
 # --- 6. MAIN UI ---
 st.title("📋 Exam Dashboard Workspace")
@@ -181,12 +192,12 @@ with col_edit:
 
     for i, section in enumerate(st.session_state.sections):
         with st.container(border=True):
-            # MODULE SELECTOR ADDED HERE
             mod_col, title_col = st.columns([1, 3])
             mod_options = ["Module 1", "Module 2", "Module 3", "Module 4", "Module 5"]
             current_mod = section.get('module', 'Module 1')
             mod_idx = mod_options.index(current_mod) if current_mod in mod_options else 0
             
+            # Allow user to change the module for this block
             section['module'] = mod_col.selectbox(f"Block {i+1} Assignment", mod_options, index=mod_idx, key=f"mod_sel_{section['id']}")
             
             if not section.get('isNote'):
@@ -207,6 +218,8 @@ with col_edit:
                     if f"lv_{q['id']}" not in st.session_state: 
                         st.session_state[f"lv_{q['id']}"] = q.get('level', 'L1')
                     q['level'] = c_lvl.selectbox("Bloom's", ["L1", "L2", "L3", "L4", "L5", "L6"], key=f"lv_{q['id']}")
+                    
+                st.button("➕ Add Sub-Question", key=f"add_sub_{section['id']}", on_click=add_sub_question, args=(i,))
 
     st.button("➕ Add New Block", on_click=add_section)
 

@@ -25,7 +25,6 @@ def load_blooms_taxonomy():
     blooms_data = {
         "L1": ["arrange", "cite", "define", "describe", "duplicate", "enumerate", "identify", "label", "list", "match", "memorize", "name", "order", "outline", "recall", "recognize", "record", "relate", "repeat", "reproduce", "select", "state", "tabulate", "tell"],
         "L2": ["approximate", "articulate", "categorize", "characterize", "clarify", "classify", "compare", "comprehend", "conclude", "contrast", "convert", "defend", "demonstrate", "discuss", "distinguish", "estimate", "explain", "express", "extend", "generalize", "illustrate", "indicate", "infer", "interpret", "locate", "paraphrase", "predict", "rephrase", "report", "restate", "review", "rewrite", "show", "summarize", "translate"],
-        # I have explicitly added 'determine' to L3, as calculating a value in engineering is an Application task.
         "L3": ["adapt", "allocate", "apply", "build", "calculate", "change", "choose", "compute", "conduct", "construct", "determine", "develop", "discover", "employ", "execute", "experiment", "function", "implement", "interview", "manipulate", "model", "modify", "operate", "practice", "produce", "schedule", "sketch", "solve", "use"],
         "L4": ["analyze", "appraise", "breakdown", "categorize", "classify", "compare", "conclude", "contrast", "criticize", "deduce", "derive", "differentiate", "discriminate", "distinguish", "examine", "experiment", "infer", "inspect", "inventory", "investigate", "model", "organize", "outline", "prioritize", "question", "relate", "separate", "simplify", "subdivide", "survey", "test"],
         "L5": ["agree", "appraise", "argue", "assess", "award", "choose", "compare", "conclude", "critique", "criticize", "decide", "deduct", "defend", "discriminate", "disprove", "estimate", "evaluate", "explain", "grade", "influence", "interpret", "judge", "justify", "mark", "measure", "perceive", "predict", "prioritize", "prove", "rate", "recommend", "score", "select", "support", "test", "validate", "value", "verify"],
@@ -35,13 +34,60 @@ def load_blooms_taxonomy():
     verb_dict = {}
     for level, verbs in blooms_data.items():
         for verb in verbs:
-            # THE FIX: If the verb was already assigned to a lower level, DO NOT overwrite it!
+            # Prevent lower cognitive levels from being overwritten by higher ones
             if verb.lower() not in verb_dict:
                 verb_dict[verb.lower()] = level
                 
     return verb_dict
 
 blooms_dict = load_blooms_taxonomy()
+
+# --- 4. ADVANCED 2D SYLLABUS MAPPING ENGINE ---
+# Maps Keyword -> {Bloom's Level -> Specific CO}
+advanced_syllabus_mapping = {
+    # Analog/Hardware Topics
+    "rectifier":  {"L1": "CO1", "L2": "CO1", "L3": "CO3", "L4": "CO3", "L5": "CO3", "L6": "CO3"},
+    "diode":      {"L1": "CO1", "L2": "CO1", "L3": "CO3", "L4": "CO3", "L5": "CO3", "L6": "CO3"},
+    "amplifier":  {"L1": "CO1", "L2": "CO1", "L3": "CO3", "L4": "CO3", "L5": "CO3", "L6": "CO3"},
+    "op-amp":     {"L1": "CO1", "L2": "CO1", "L3": "CO3", "L4": "CO3", "L5": "CO3", "L6": "CO3"},
+    "oscillator": {"L1": "CO1", "L2": "CO1", "L3": "CO3", "L4": "CO3", "L5": "CO3", "L6": "CO3"},
+    "filter":     {"L1": "CO1", "L2": "CO1", "L3": "CO3", "L4": "CO3", "L5": "CO3", "L6": "CO3"},
+    
+    # Digital/Communication Topics
+    "number system": {"L1": "CO2", "L2": "CO2", "L3": "CO4", "L4": "CO4", "L5": "CO4", "L6": "CO4"},
+    "logic circuit": {"L1": "CO2", "L2": "CO2", "L3": "CO4", "L4": "CO4", "L5": "CO4", "L6": "CO4"},
+    "boolean":       {"L1": "CO2", "L2": "CO2", "L3": "CO4", "L4": "CO4", "L5": "CO4", "L6": "CO4"},
+    "gates":         {"L1": "CO2", "L2": "CO2", "L3": "CO4", "L4": "CO4", "L5": "CO4", "L6": "CO4"},
+    "communication": {"L1": "CO2", "L2": "CO2", "L3": "CO4", "L4": "CO4", "L5": "CO4", "L6": "CO4"},
+    
+    # System Level / Culminating Topics
+    "develop":  {"L1": "CO5", "L2": "CO5", "L3": "CO5", "L4": "CO5", "L5": "CO5", "L6": "CO5"},
+    "sensors":  {"L1": "CO5", "L2": "CO5", "L3": "CO5", "L4": "CO5", "L5": "CO5", "L6": "CO5"},
+    "embedded": {"L1": "CO5", "L2": "CO5", "L3": "CO5", "L4": "CO5", "L5": "CO5", "L6": "CO5"}
+}
+
+def auto_tag_question(text):
+    if not text: return "L1", "CO1"
+    
+    suggested_lvl = "L1"
+    suggested_co = "CO1"
+    text_lower = text.lower()
+    
+    # 1. FIND BLOOM'S LEVEL FIRST
+    words = re.findall(r'\b[a-zA-Z-]+\b', text_lower)
+    for word in words[:7]: 
+        if word in blooms_dict:
+            suggested_lvl = blooms_dict[word]
+            break
+            
+    # 2. CROSS-REFERENCE TOPIC AND BLOOM'S LEVEL FOR CO
+    for keyword, level_rules in advanced_syllabus_mapping.items():
+        if re.search(r'\b' + re.escape(keyword) + r'\b', text_lower):
+            suggested_co = level_rules.get(suggested_lvl, "CO1")
+            break 
+            
+    return suggested_lvl, suggested_co
+
 # --- HTML GENERATOR ---
 def generate_html():
     html = f"""

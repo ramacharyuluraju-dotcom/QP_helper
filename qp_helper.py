@@ -34,7 +34,6 @@ def load_blooms_taxonomy():
     verb_dict = {}
     for level, verbs in blooms_data.items():
         for verb in verbs:
-            # Prevent lower cognitive levels from being overwritten by higher ones
             if verb.lower() not in verb_dict:
                 verb_dict[verb.lower()] = level
                 
@@ -43,24 +42,18 @@ def load_blooms_taxonomy():
 blooms_dict = load_blooms_taxonomy()
 
 # --- 4. ADVANCED 2D SYLLABUS MAPPING ENGINE ---
-# Maps Keyword -> {Bloom's Level -> Specific CO}
 advanced_syllabus_mapping = {
-    # Analog/Hardware Topics
     "rectifier":  {"L1": "CO1", "L2": "CO1", "L3": "CO3", "L4": "CO3", "L5": "CO3", "L6": "CO3"},
     "diode":      {"L1": "CO1", "L2": "CO1", "L3": "CO3", "L4": "CO3", "L5": "CO3", "L6": "CO3"},
     "amplifier":  {"L1": "CO1", "L2": "CO1", "L3": "CO3", "L4": "CO3", "L5": "CO3", "L6": "CO3"},
     "op-amp":     {"L1": "CO1", "L2": "CO1", "L3": "CO3", "L4": "CO3", "L5": "CO3", "L6": "CO3"},
     "oscillator": {"L1": "CO1", "L2": "CO1", "L3": "CO3", "L4": "CO3", "L5": "CO3", "L6": "CO3"},
     "filter":     {"L1": "CO1", "L2": "CO1", "L3": "CO3", "L4": "CO3", "L5": "CO3", "L6": "CO3"},
-    
-    # Digital/Communication Topics
     "number system": {"L1": "CO2", "L2": "CO2", "L3": "CO4", "L4": "CO4", "L5": "CO4", "L6": "CO4"},
     "logic circuit": {"L1": "CO2", "L2": "CO2", "L3": "CO4", "L4": "CO4", "L5": "CO4", "L6": "CO4"},
     "boolean":       {"L1": "CO2", "L2": "CO2", "L3": "CO4", "L4": "CO4", "L5": "CO4", "L6": "CO4"},
     "gates":         {"L1": "CO2", "L2": "CO2", "L3": "CO4", "L4": "CO4", "L5": "CO4", "L6": "CO4"},
     "communication": {"L1": "CO2", "L2": "CO2", "L3": "CO4", "L4": "CO4", "L5": "CO4", "L6": "CO4"},
-    
-    # System Level / Culminating Topics
     "develop":  {"L1": "CO5", "L2": "CO5", "L3": "CO5", "L4": "CO5", "L5": "CO5", "L6": "CO5"},
     "sensors":  {"L1": "CO5", "L2": "CO5", "L3": "CO5", "L4": "CO5", "L5": "CO5", "L6": "CO5"},
     "embedded": {"L1": "CO5", "L2": "CO5", "L3": "CO5", "L4": "CO5", "L5": "CO5", "L6": "CO5"}
@@ -73,14 +66,12 @@ def auto_tag_question(text):
     suggested_co = "CO1"
     text_lower = text.lower()
     
-    # 1. FIND BLOOM'S LEVEL FIRST
     words = re.findall(r'\b[a-zA-Z-]+\b', text_lower)
     for word in words[:7]: 
         if word in blooms_dict:
             suggested_lvl = blooms_dict[word]
             break
             
-    # 2. CROSS-REFERENCE TOPIC AND BLOOM'S LEVEL FOR CO
     for keyword, level_rules in advanced_syllabus_mapping.items():
         if re.search(r'\b' + re.escape(keyword) + r'\b', text_lower):
             suggested_co = level_rules.get(suggested_lvl, "CO1")
@@ -109,9 +100,13 @@ def generate_html():
     """
     for sec in st.session_state.sections:
         if not sec.get('isNote'):
+            # ADDING THE MODULE HEADER ROW
+            mod_name = sec.get('module', 'Module')
+            html += f"<tr><td colspan='5' style='text-align: center; font-weight: bold; padding: 8px; background-color: #f0f2f6; border: 1px solid #000;'>--- {mod_name.upper()} ---</td></tr>"
+            
             for q in sec['questions']:
                 if q['text'].strip().upper() == 'OR':
-                    html += f"<tr><td colspan='5' style='text-align: center; font-weight: bold; padding: 10px; background:#eee;'>--- OR ---</td></tr>"
+                    html += f"<tr><td colspan='5' style='text-align: center; font-weight: bold; padding: 10px; background:#fff;'>--- OR ---</td></tr>"
                 else:
                     html += f"""
                     <tr>
@@ -133,20 +128,25 @@ if 'exam_details' not in st.session_state:
     }
 
 if 'sections' not in st.session_state:
+    # Added 'module' tracking to each block
     st.session_state.sections = [
-        {'id': 100, 'isNote': False, 'questions': [
+        {'id': 100, 'module': 'Module 1', 'isNote': False, 'questions': [
             {'id': 101, 'qNo': '1.a', 'text': 'Define PN junction diode and its characteristics.', 'marks': 5, 'co': 'CO1', 'level': 'L1'},
             {'id': 102, 'qNo': '1.b', 'text': 'Explain the working of full wave rectifier.', 'marks': 5, 'co': 'CO1', 'level': 'L1'}
         ]},
-        {'id': 200, 'isNote': False, 'questions': [
+        {'id': 200, 'module': 'Module 2', 'isNote': False, 'questions': [
             {'id': 201, 'qNo': '2.a', 'text': 'Determine the ripple factor of a half wave rectifier.', 'marks': 5, 'co': 'CO1', 'level': 'L1'}
         ]}
     ]
 
 def add_section():
     new_id = int(datetime.datetime.now().timestamp() * 1000)
+    # Smart module increment (If previous was Module 2, default this to Module 3)
+    current_modules = len(st.session_state.sections)
+    next_mod_num = current_modules + 1 if current_modules < 5 else 5
+    
     st.session_state.sections.append({
-        'id': new_id, 'isNote': False, 
+        'id': new_id, 'module': f'Module {next_mod_num}', 'isNote': False, 
         'questions': [{'id': new_id + 1, 'qNo': '', 'text': '', 'marks': 0, 'co': 'CO1', 'level': 'L1'}]
     })
 
@@ -178,17 +178,22 @@ with col_edit:
         st.session_state.exam_details['duration'] = col2.text_input("Duration", st.session_state.exam_details['duration'])
 
     st.divider()
-    st.info("💡 **Magic Test:** Edit Question 2.a. Change 'Determine' to 'Explain'. Press `Ctrl+Enter` and watch the CO dynamically shift from CO3 to CO1 based on the 2D Engine!")
 
     for i, section in enumerate(st.session_state.sections):
-        st.markdown(f"**Block {i+1}**")
-        if not section.get('isNote'):
-            for j, q in enumerate(section['questions']):
-                with st.container(border=True):
+        with st.container(border=True):
+            # MODULE SELECTOR ADDED HERE
+            mod_col, title_col = st.columns([1, 3])
+            mod_options = ["Module 1", "Module 2", "Module 3", "Module 4", "Module 5"]
+            current_mod = section.get('module', 'Module 1')
+            mod_idx = mod_options.index(current_mod) if current_mod in mod_options else 0
+            
+            section['module'] = mod_col.selectbox(f"Block {i+1} Assignment", mod_options, index=mod_idx, key=f"mod_sel_{section['id']}")
+            
+            if not section.get('isNote'):
+                for j, q in enumerate(section['questions']):
                     c_no, c_txt = st.columns([1, 5])
                     q['qNo'] = c_no.text_input("Q No.", q['qNo'], key=f"qn_{q['id']}")
                     
-                    # Interactivity Trigger
                     c_txt.text_area("Question Text (Ctrl+Enter to auto-tag)", q['text'], key=f"qt_{q['id']}", 
                                     on_change=update_tags, args=(q['id'], i, j))
                     
@@ -203,7 +208,7 @@ with col_edit:
                         st.session_state[f"lv_{q['id']}"] = q.get('level', 'L1')
                     q['level'] = c_lvl.selectbox("Bloom's", ["L1", "L2", "L3", "L4", "L5", "L6"], key=f"lv_{q['id']}")
 
-    st.button("➕ Add Question", on_click=add_section)
+    st.button("➕ Add New Block", on_click=add_section)
 
 with col_view:
     st.header("📊 Live Dashboard")

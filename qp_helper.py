@@ -19,7 +19,7 @@ def init_db():
 
 init_db()
 
-# --- 3. HARDCODED BLOOM'S TAXONOMY ENGINE (FIXED) ---
+# --- 3. HARDCODED BLOOM'S TAXONOMY ENGINE ---
 @st.cache_data
 def load_blooms_taxonomy():
     blooms_data = {
@@ -79,7 +79,7 @@ def auto_tag_question(text):
             
     return suggested_lvl, suggested_co
 
-# --- HTML GENERATOR (FIXED MODULE GROUPING) ---
+# --- HTML GENERATOR ---
 def generate_html():
     html = f"""
     <div style="font-family: Arial, sans-serif; padding: 20px; border: 1px solid #ccc; max-width: 800px; margin: auto; background-color: white;">
@@ -99,14 +99,12 @@ def generate_html():
             </tr>
     """
     
-    # We keep track of the last module printed so we don't repeat the header
     last_printed_module = None
     
     for sec in st.session_state.sections:
         if not sec.get('isNote'):
             current_module = sec.get('module', 'Module 1')
             
-            # ONLY print the header if the module has changed!
             if current_module != last_printed_module:
                 html += f"<tr><td colspan='5' style='text-align: center; font-weight: bold; padding: 8px; background-color: #f0f2f6; border: 1px solid #000;'>--- {current_module.upper()} ---</td></tr>"
                 last_printed_module = current_module
@@ -137,11 +135,11 @@ if 'exam_details' not in st.session_state:
 if 'sections' not in st.session_state:
     st.session_state.sections = [
         {'id': 100, 'module': 'Module 1', 'isNote': False, 'questions': [
-            {'id': 101, 'qNo': '1.a', 'text': 'Define PN junction diode and its characteristics.', 'marks': 5, 'co': 'CO1', 'level': 'L1'},
-            {'id': 102, 'qNo': '1.b', 'text': 'Explain the working of full wave rectifier.', 'marks': 5, 'co': 'CO1', 'level': 'L1'}
+            {'id': 101, 'qNo': '', 'text': 'Define PN junction diode and its characteristics.', 'marks': 5, 'co': 'CO1', 'level': 'L1'},
+            {'id': 102, 'qNo': '', 'text': 'Explain the working of full wave rectifier.', 'marks': 5, 'co': 'CO1', 'level': 'L1'}
         ]},
         {'id': 200, 'module': 'Module 2', 'isNote': False, 'questions': [
-            {'id': 201, 'qNo': '2.a', 'text': 'Determine the ripple factor of a half wave rectifier.', 'marks': 5, 'co': 'CO1', 'level': 'L1'}
+            {'id': 201, 'qNo': '', 'text': 'Determine the ripple factor of a half wave rectifier.', 'marks': 5, 'co': 'CO1', 'level': 'L1'}
         ]}
     ]
 
@@ -190,6 +188,7 @@ with col_edit:
 
     st.divider()
 
+    # i represents the Block Index (Main Question Number)
     for i, section in enumerate(st.session_state.sections):
         with st.container(border=True):
             mod_col, title_col = st.columns([1, 3])
@@ -197,13 +196,21 @@ with col_edit:
             current_mod = section.get('module', 'Module 1')
             mod_idx = mod_options.index(current_mod) if current_mod in mod_options else 0
             
-            # Allow user to change the module for this block
-            section['module'] = mod_col.selectbox(f"Block {i+1} Assignment", mod_options, index=mod_idx, key=f"mod_sel_{section['id']}")
+            section['module'] = mod_col.selectbox(f"Question {i+1} Assignment", mod_options, index=mod_idx, key=f"mod_sel_{section['id']}")
             
             if not section.get('isNote'):
+                # j represents the Sub-Question Index (a, b, c...)
                 for j, q in enumerate(section['questions']):
+                    
+                    # ---- AUTO NUMBERING LOGIC ----
+                    # Block 1 = Q1. j=0 -> 'a'. Final string = "1.a"
+                    computed_qno = f"{i+1}.{chr(97+j)}"
+                    q['qNo'] = computed_qno  # Save to state for HTML preview
+                    
                     c_no, c_txt = st.columns([1, 5])
-                    q['qNo'] = c_no.text_input("Q No.", q['qNo'], key=f"qn_{q['id']}")
+                    
+                    # Display it to the user, but disable typing to show it's automatic
+                    c_no.text_input("Q No.", value=computed_qno, disabled=True, key=f"qn_{q['id']}")
                     
                     c_txt.text_area("Question Text (Ctrl+Enter to auto-tag)", q['text'], key=f"qt_{q['id']}", 
                                     on_change=update_tags, args=(q['id'], i, j))
@@ -221,7 +228,7 @@ with col_edit:
                     
                 st.button("➕ Add Sub-Question", key=f"add_sub_{section['id']}", on_click=add_sub_question, args=(i,))
 
-    st.button("➕ Add New Block", on_click=add_section)
+    st.button("➕ Add New Main Question", on_click=add_section)
 
 with col_view:
     st.header("📊 Live Dashboard")

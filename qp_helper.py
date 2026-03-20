@@ -9,96 +9,110 @@ import streamlit.components.v1 as components
 # --- 1. CONFIGURATION ---
 st.set_page_config(page_title="AMC Exam Portal Pro", layout="wide", page_icon="🎓")
 
-# --- 2. EXCEL TEMPLATE GENERATOR ---
+# --- 2. UNIVERSAL BLOOM'S TAXONOMY (HARDCODED) ---
+@st.cache_data
+def load_blooms_taxonomy():
+    blooms_data = {
+        "L1": ["arrange", "cite", "define", "describe", "duplicate", "enumerate", "identify", "label", "list", "match", "memorize", "name", "order", "outline", "recall", "recognize", "record", "relate", "repeat", "reproduce", "select", "state", "tabulate", "tell"],
+        "L2": ["approximate", "articulate", "categorize", "characterize", "clarify", "classify", "compare", "comprehend", "conclude", "contrast", "convert", "defend", "demonstrate", "discuss", "distinguish", "estimate", "explain", "express", "extend", "generalize", "illustrate", "indicate", "infer", "interpret", "locate", "paraphrase", "predict", "rephrase", "report", "restate", "review", "rewrite", "show", "summarize", "translate"],
+        "L3": ["adapt", "allocate", "apply", "build", "calculate", "change", "choose", "compute", "conduct", "construct", "determine", "develop", "discover", "employ", "execute", "experiment", "function", "implement", "interview", "manipulate", "model", "modify", "operate", "practice", "produce", "schedule", "sketch", "solve", "use"],
+        "L4": ["analyze", "analyse", "appraise", "breakdown", "categorize", "classify", "compare", "conclude", "contrast", "criticize", "deduce", "derive", "differentiate", "discriminate", "distinguish", "examine", "experiment", "infer", "inspect", "inventory", "investigate", "model", "organize", "outline", "prioritize", "question", "relate", "separate", "simplify", "subdivide", "survey", "test"],
+        "L5": ["agree", "appraise", "argue", "assess", "award", "choose", "compare", "conclude", "critique", "criticize", "decide", "deduct", "defend", "discriminate", "disprove", "estimate", "evaluate", "explain", "grade", "influence", "interpret", "judge", "justify", "mark", "measure", "perceive", "predict", "prioritize", "prove", "rate", "recommend", "score", "select", "support", "test", "validate", "value", "verify"],
+        "L6": ["adapt", "arrange", "assemble", "build", "change", "combine", "compile", "compose", "construct", "create", "delete", "design", "develop", "devise", "elaborate", "estimate", "formulate", "generate", "imagine", "improve", "invent", "manage", "maximize", "minimize", "modify", "optimize", "organize", "originate", "plan", "predict", "prepare", "produce", "propose", "reconstruct", "revise", "rewrite", "synthesize"]
+    }
+    verb_dict = {}
+    for level, verbs in blooms_data.items():
+        for verb in verbs:
+            if verb.lower() not in verb_dict:
+                verb_dict[verb.lower()] = level
+    return verb_dict
+
+blooms_dict = load_blooms_taxonomy()
+
+# --- 3. DYNAMIC EXCEL TEMPLATE GENERATOR ---
 def generate_excel_template():
     output = io.BytesIO()
     df_course = pd.DataFrame({
-        'Institution': ['AMC Engineering College'], 'CourseCode': ['1BESC104C'], 
-        'CourseName': ['Intro to Electronics'], 'MaxMarks': [50], 'Duration': ['3 Hours']
+        'Institution': ['AMC Engineering College'], 'CourseCode': ['Enter Code Here'], 
+        'CourseName': ['Enter Subject Name Here'], 'MaxMarks': [50], 'Duration': ['3 Hours']
     })
-    df_blooms = pd.DataFrame({'Verb': ['analyse', 'calculate', 'derive'], 'Level': ['L4', 'L3', 'L4']})
+    # Notice: Bloom's is gone. Only Course Details and Syllabus Mapping are here!
     df_syllabus = pd.DataFrame({
-        'Keyword': ['diode', 'number system'], 
+        'Keyword': ['example_topic_1', 'example_topic_2'], 
         'L1': ['CO1', 'CO2'], 'L2': ['CO1', 'CO2'], 'L3': ['CO3', 'CO4'], 
         'L4': ['CO3', 'CO4'], 'L5': ['CO3', 'CO4'], 'L6': ['CO3', 'CO4']
     })
     
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         df_course.to_excel(writer, sheet_name='CourseSetup', index=False)
-        df_blooms.to_excel(writer, sheet_name='CustomBlooms', index=False)
         df_syllabus.to_excel(writer, sheet_name='SyllabusMapping', index=False)
-    
     return output.getvalue()
 
-# --- 3. DATABASE LOADER ---
-def get_default_db():
-    return {
-        'course': {'institution': 'AMC Engineering College', 'courseCode': '1BESC104C', 'courseName': 'Intro to Electronics', 'maxMarks': 50, 'duration': '3 Hours'},
-        'blooms': {
-            "define": "L1", "list": "L1", "explain": "L2", "describe": "L2",
-            "calculate": "L3", "determine": "L3", "analyze": "L4", "evaluate": "L5", "design": "L6"
-        },
-        'syllabus': {"rectifier":  {"L1": "CO1", "L2": "CO1", "L3": "CO3", "L4": "CO3", "L5": "CO3", "L6": "CO3"}}
+# --- 4. STATE MANAGEMENT & DATA LOADERS ---
+if 'exam_details' not in st.session_state:
+    st.session_state.exam_details = {
+        'institution': 'AMC Engineering College', 'courseCode': 'SUBJECT_CODE', 
+        'courseName': 'SUBJECT_NAME', 'maxMarks': 50, 'duration': '3 Hours'
     }
 
-if 'db' not in st.session_state:
-    st.session_state.db = get_default_db()
-    st.session_state.is_custom_db = False
+if 'syllabus_mapping' not in st.session_state:
+    st.session_state.syllabus_mapping = {}
+
+if 'sections' not in st.session_state:
+    st.session_state.sections = [
+        {'id': 100, 'module': 'Module 1', 'isNote': False, 'questions': [
+            {'id': 101, 'qNo': '', 'text': '', 'marks': 5, 'co': 'CO1', 'level': 'L1'}
+        ]}
+    ]
 
 def load_excel_database(uploaded_file):
     try:
-        new_db = get_default_db() 
+        new_syllabus = {}
         df_course = pd.read_excel(uploaded_file, sheet_name='CourseSetup').dropna(how="all")
         if not df_course.empty:
-            new_db['course'] = {
+            st.session_state.exam_details = {
                 'institution': str(df_course['Institution'].iloc[0]), 'courseCode': str(df_course['CourseCode'].iloc[0]),
                 'courseName': str(df_course['CourseName'].iloc[0]), 'maxMarks': int(df_course['MaxMarks'].iloc[0]),
                 'duration': str(df_course['Duration'].iloc[0])
             }
             
-        df_blooms = pd.read_excel(uploaded_file, sheet_name='CustomBlooms').dropna(how="all")
-        for index, row in df_blooms.iterrows():
-            if pd.notna(row['Verb']) and pd.notna(row['Level']):
-                new_db['blooms'][str(row['Verb']).lower().strip()] = str(row['Level']).strip().upper()
-                
         df_syl = pd.read_excel(uploaded_file, sheet_name='SyllabusMapping').dropna(how="all")
         for index, row in df_syl.iterrows():
             if pd.notna(row['Keyword']):
                 kw = str(row['Keyword']).lower().strip()
-                new_db['syllabus'][kw] = {
+                new_syllabus[kw] = {
                     "L1": str(row.get('L1', 'CO1')).strip(), "L2": str(row.get('L2', 'CO1')).strip(),
                     "L3": str(row.get('L3', 'CO1')).strip(), "L4": str(row.get('L4', 'CO1')).strip(),
                     "L5": str(row.get('L5', 'CO1')).strip(), "L6": str(row.get('L6', 'CO1')).strip()
                 }
-        
-        st.session_state.db = new_db
-        st.session_state.exam_details = new_db['course']
-        st.session_state.is_custom_db = True
+        st.session_state.syllabus_mapping = new_syllabus
         return True
     except Exception as e:
         st.error(f"Error reading Excel file. Ensure you are using the official template. Error: {e}")
         return False
 
-# --- 4. AUTO TAGGING ENGINE ---
+# --- 5. AUTO TAGGING ENGINE ---
 def auto_tag_question(text):
     if not text: return "L1", "CO1"
     suggested_lvl, suggested_co = "L1", "CO1"
     text_lower = text.lower()
     
+    # Check universal Bloom's Dictionary
     words = re.findall(r'\b[a-zA-Z-]+\b', text_lower)
     for word in words[:7]: 
-        if word in st.session_state.db['blooms']:
-            suggested_lvl = st.session_state.db['blooms'][word]
+        if word in blooms_dict:
+            suggested_lvl = blooms_dict[word]
             break
             
-    for keyword, level_rules in st.session_state.db['syllabus'].items():
+    # Check Subject-Specific Syllabus mapping
+    for keyword, level_rules in st.session_state.syllabus_mapping.items():
         if re.search(r'\b' + re.escape(keyword) + r'\b', text_lower):
             suggested_co = level_rules.get(suggested_lvl, "CO1")
             break 
             
     return suggested_lvl, suggested_co
 
-# --- HTML GENERATOR ---
+# --- 6. HTML GENERATOR ---
 def generate_html():
     html = f"""
     <div style="font-family: Arial, sans-serif; padding: 20px; border: 1px solid #ccc; max-width: 800px; margin: auto; background-color: white;">
@@ -141,37 +155,19 @@ def generate_html():
     html += "</table></div>"
     return html
 
-# --- STATE MANAGEMENT & CALLBACKS ---
-if 'exam_details' not in st.session_state:
-    st.session_state.exam_details = st.session_state.db['course']
-
-if 'sections' not in st.session_state:
-    st.session_state.sections = [
-        {'id': 100, 'module': 'Module 1', 'isNote': False, 'questions': [
-            {'id': 101, 'qNo': '', 'text': '', 'marks': 5, 'co': 'CO1', 'level': 'L1'}
-        ]}
-    ]
-
+# --- 7. HELPER FUNCTIONS ---
 def add_section():
     new_id = int(datetime.datetime.now().timestamp() * 1000)
     current_modules = len(st.session_state.sections)
     next_mod_num = current_modules + 1 if current_modules < 5 else 5
-    st.session_state.sections.append({
-        'id': new_id, 'module': f'Module {next_mod_num}', 'isNote': False, 
-        'questions': [{'id': new_id + 1, 'qNo': '', 'text': '', 'marks': 0, 'co': 'CO1', 'level': 'L1'}]
-    })
+    st.session_state.sections.append({'id': new_id, 'module': f'Module {next_mod_num}', 'isNote': False, 'questions': [{'id': new_id + 1, 'qNo': '', 'text': '', 'marks': 0, 'co': 'CO1', 'level': 'L1'}]})
 
 def add_sub_question(sec_idx):
     new_id = int(datetime.datetime.now().timestamp() * 1000)
-    st.session_state.sections[sec_idx]['questions'].append({
-        'id': new_id, 'qNo': '', 'text': '', 'marks': 0, 'co': 'CO1', 'level': 'L1'
-    })
+    st.session_state.sections[sec_idx]['questions'].append({'id': new_id, 'qNo': '', 'text': '', 'marks': 0, 'co': 'CO1', 'level': 'L1'})
 
-def delete_section(sec_idx):
-    st.session_state.sections.pop(sec_idx)
-
-def delete_sub_question(sec_idx, q_idx):
-    st.session_state.sections[sec_idx]['questions'].pop(q_idx)
+def delete_section(sec_idx): st.session_state.sections.pop(sec_idx)
+def delete_sub_question(sec_idx, q_idx): st.session_state.sections[sec_idx]['questions'].pop(q_idx)
 
 def update_tags(q_id, sec_idx, q_idx):
     typed_text = st.session_state[f"qt_{q_id}"]
@@ -182,11 +178,11 @@ def update_tags(q_id, sec_idx, q_idx):
     st.session_state.sections[sec_idx]['questions'][q_idx]['level'] = new_level
     st.session_state.sections[sec_idx]['questions'][q_idx]['co'] = new_co
 
-# --- DRAFT SAVE/LOAD LOGIC ---
 def export_draft_json():
     draft_data = {
-        'exam_details': st.session_state.exam_details,
-        'sections': st.session_state.sections
+        'exam_details': st.session_state.exam_details, 
+        'sections': st.session_state.sections,
+        'syllabus_mapping': st.session_state.syllabus_mapping # Save the brain with the draft!
     }
     return json.dumps(draft_data, indent=4)
 
@@ -195,55 +191,44 @@ def load_draft_json(uploaded_draft):
         draft_data = json.load(uploaded_draft)
         st.session_state.exam_details = draft_data['exam_details']
         st.session_state.sections = draft_data['sections']
+        if 'syllabus_mapping' in draft_data:
+            st.session_state.syllabus_mapping = draft_data['syllabus_mapping']
         return True
     except Exception as e:
-        st.error(f"Invalid draft file. Error: {e}")
+        st.error("Invalid draft file.")
         return False
 
-
-# --- UI LAYOUT ---
+# --- 8. UI LAYOUT ---
 st.title("🎓 AMC Exam Portal Pro")
 
-tab_editor, tab_setup = st.tabs(["📝 Exam Paper Editor", "⚙️ Setup & Engine Configuration"])
+tab_editor, tab_setup = st.tabs(["📝 Exam Paper Editor", "⚙️ Subject Configuration (Excel)"])
 
 with tab_setup:
-    st.header("⚙️ Configure Intelligence Engine")
-    st.write("Customize the course details, Bloom's dictionary, and Syllabus mappings by uploading an Excel configuration file.")
+    st.header("⚙️ Configure Subject Specifics")
+    st.write("Since Bloom's Taxonomy is universally programmed into this app, you only need to upload the Course Details and Syllabus CO mappings for the specific subject you are teaching.")
     col_dl, col_ul = st.columns(2)
     with col_dl:
-        st.subheader("Step 1: Download Template")
+        st.subheader("Step 1: Download Subject Template")
         excel_data = generate_excel_template()
-        st.download_button(label="📥 Download Excel Template", data=excel_data, file_name="AMC_Intelligence_Template.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary")
+        st.download_button(label="📥 Download Excel Template", data=excel_data, file_name="Subject_Syllabus_Template.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary")
     with col_ul:
-        st.subheader("Step 2: Upload Configuration")
+        st.subheader("Step 2: Upload Subject Rules")
         uploaded_file = st.file_uploader("Upload Configured Excel", type=['xlsx'])
         if uploaded_file is not None:
             if load_excel_database(uploaded_file):
-                st.success("✅ Custom Database Loaded Successfully!")
+                st.success("✅ Subject Database Loaded Successfully!")
     st.divider()
-    if st.session_state.is_custom_db:
-        st.success("🧠 Currently running on: **Custom Uploaded Configuration**")
+    if len(st.session_state.syllabus_mapping) > 0:
+        st.success(f"🧠 Currently running with {len(st.session_state.syllabus_mapping)} Subject-Specific Mapping Rules.")
     else:
-        st.info("🧠 Currently running on: **Default Baseline Configuration**")
+        st.warning("⚠️ No Subject Mappings loaded. The app will only predict Bloom's Taxonomy, not COs.")
 
 with tab_editor:
-    if not st.session_state.is_custom_db:
-        st.warning("⚠️ You are using the default database. Go to the Setup Tab to upload your specific Course Rules.")
-    
     # --- SAVE / RESUME PROGRESS BAR ---
-    with st.expander("💾 Save / Resume Progress", expanded=False):
-        st.write("Need to take a break? Download your current draft and upload it later to resume exactly where you left off.")
+    with st.expander("💾 Save or Resume a Draft", expanded=False):
         c_save, c_load = st.columns(2)
-        
         with c_save:
-            st.download_button(
-                label="📥 Download Current Draft (.json)",
-                data=export_draft_json(),
-                file_name=f"Draft_{st.session_state.exam_details['courseCode']}_Exam.json",
-                mime="application/json",
-                type="primary"
-            )
-            
+            st.download_button(label="📥 Download Current Draft (.json)", data=export_draft_json(), file_name=f"Draft_{st.session_state.exam_details['courseCode']}_Exam.json", mime="application/json", type="primary")
         with c_load:
             draft_upload = st.file_uploader("📂 Upload Previous Draft (.json)", type=['json'], key="draft_up")
             if draft_upload is not None:
@@ -251,7 +236,7 @@ with tab_editor:
                     if load_draft_json(draft_upload):
                         st.success("Draft Loaded Successfully!")
                         st.rerun()
-                        
+
     st.divider()
 
     # --- EDITOR UI ---
@@ -312,4 +297,4 @@ with tab_editor:
         st.header("👁️ Live Document Preview")
         html_content = generate_html()
         components.html(html_content, height=600, scrolling=True)
-        st.download_button(label="📥 Finalize & Download HTML", data=html_content, file_name=f"{st.session_state.exam_details['courseCode']}_QP.html", mime="text/html", type="primary")
+        st.download_button(label="📥 Finalize & Download HTML QP", data=html_content, file_name=f"{st.session_state.exam_details['courseCode']}_QP.html", mime="text/html", type="primary")

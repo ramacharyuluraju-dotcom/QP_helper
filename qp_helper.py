@@ -1,85 +1,97 @@
 import streamlit as st
 import pandas as pd
-import sqlite3
 import datetime
 import re
+import io
 import json
 import streamlit.components.v1 as components
 
 # --- 1. CONFIGURATION ---
 st.set_page_config(page_title="AMC Exam Portal Pro", layout="wide", page_icon="🎓")
 
-# --- 2. LOCAL DB SETUP & CRUD ---
-conn = sqlite3.connect('amc_exams_local.db', check_same_thread=False)
-cursor = conn.cursor()
+# --- 2. EXCEL TEMPLATE GENERATOR ---
+def generate_excel_template():
+    output = io.BytesIO()
+    df_course = pd.DataFrame({
+        'Institution': ['AMC Engineering College'], 'CourseCode': ['1BESC104C'], 
+        'CourseName': ['Intro to Electronics'], 'MaxMarks': [50], 'Duration': ['3 Hours']
+    })
+    df_blooms = pd.DataFrame({'Verb': ['analyse', 'calculate', 'derive'], 'Level': ['L4', 'L3', 'L4']})
+    df_syllabus = pd.DataFrame({
+        'Keyword': ['diode', 'number system'], 
+        'L1': ['CO1', 'CO2'], 'L2': ['CO1', 'CO2'], 'L3': ['CO3', 'CO4'], 
+        'L4': ['CO3', 'CO4'], 'L5': ['CO3', 'CO4'], 'L6': ['CO3', 'CO4']
+    })
+    
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df_course.to_excel(writer, sheet_name='CourseSetup', index=False)
+        df_blooms.to_excel(writer, sheet_name='CustomBlooms', index=False)
+        df_syllabus.to_excel(writer, sheet_name='SyllabusMapping', index=False)
+    
+    return output.getvalue()
 
-def init_db():
-    # Exams table (future use for saving full papers)
-    cursor.execute('''CREATE TABLE IF NOT EXISTS exams (id TEXT PRIMARY KEY, course_code TEXT, exam_data TEXT, status TEXT, last_updated TEXT)''')
-    # Custom Bloom's Dictionary
-    cursor.execute('''CREATE TABLE IF NOT EXISTS custom_blooms (verb TEXT PRIMARY KEY, level TEXT)''')
-    # Custom Syllabus to CO Mapping
-    cursor.execute('''CREATE TABLE IF NOT EXISTS co_mappings (keyword TEXT PRIMARY KEY, rules TEXT)''')
-    # Course Setup defaults
-    cursor.execute('''CREATE TABLE IF NOT EXISTS course_setup (id INTEGER PRIMARY KEY, institution TEXT, course_code TEXT, course_name TEXT, max_marks INTEGER, duration TEXT)''')
-    conn.commit()
-
-init_db()
-
-# --- 3. DYNAMIC DICTIONARIES (Merged Hardcoded + DB) ---
-@st.cache_data(ttl=2) # Short TTL so DB updates reflect quickly
-def load_blooms_taxonomy():
-    # Base defaults (Included 'analyse' UK spelling!)
-    verb_dict = {
-        "define": "L1", "list": "L1", "state": "L1", "recall": "L1",
-        "explain": "L2", "describe": "L2", "discuss": "L2", "compare": "L2",
-        "calculate": "L3", "determine": "L3", "solve": "L3", "apply": "L3",
-        "analyze": "L4", "analyse": "L4", "differentiate": "L4", "derive": "L4",
-        "evaluate": "L5", "judge": "L5", "assess": "L5", "justify": "L5",
-        "design": "L6", "develop": "L6", "create": "L6", "formulate": "L6"
+# --- 3. DATABASE LOADER ---
+def get_default_db():
+    return {
+        'course': {'institution': 'AMC Engineering College', 'courseCode': '1BESC104C', 'courseName': 'Intro to Electronics', 'maxMarks': 50, 'duration': '3 Hours'},
+        'blooms': {
+            "define": "L1", "list": "L1", "explain": "L2", "describe": "L2",
+            "calculate": "L3", "determine": "L3", "analyze": "L4", "evaluate": "L5", "design": "L6"
+        },
+        'syllabus': {"rectifier":  {"L1": "CO1", "L2": "CO1", "L3": "CO3", "L4": "CO3", "L5": "CO3", "L6": "CO3"}}
     }
-    # Merge with custom verbs from DB
-    cursor.execute("SELECT verb, level FROM custom_blooms")
-    for row in cursor.fetchall():
-        verb_dict[row[0].lower()] = row[1]
-    return verb_dict
 
-@st.cache_data(ttl=2)
-def load_syllabus_mapping():
-    # Base defaults
-    mapping = {
-        "rectifier":  {"L1": "CO1", "L2": "CO1", "L3": "CO3", "L4": "CO3", "L5": "CO3", "L6": "CO3"},
-        "op-amp":     {"L1": "CO1", "L2": "CO1", "L3": "CO3", "L4": "CO3", "L5": "CO3", "L6": "CO3"}
-    }
-    # Merge with DB mappings
-    cursor.execute("SELECT keyword, rules FROM co_mappings")
-    for row in cursor.fetchall():
-        try:
-            mapping[row[0].lower()] = json.loads(row[1])
-        except:
-            pass
-    return mapping
+if 'db' not in st.session_state:
+    st.session_state.db = get_default_db()
+    st.session_state.is_custom_db = False
 
-blooms_dict = load_blooms_taxonomy()
-advanced_syllabus_mapping = load_syllabus_mapping()
+def load_excel_database(uploaded_file):
+    try:
+        new_db = get_default_db() 
+        df_course = pd.read_excel(uploaded_file, sheet_name='CourseSetup').dropna(how="all")
+        if not df_course.empty:
+            new_db['course'] = {
+                'institution': str(df_course['Institution'].iloc[0]), 'courseCode': str(df_course['CourseCode'].iloc[0]),
+                'courseName': str(df_course['CourseName'].iloc[0]), 'maxMarks': int(df_course['MaxMarks'].iloc[0]),
+                'duration': str(df_course['Duration'].iloc[0])
+            }
+            
+        df_blooms = pd.read_excel(uploaded_file, sheet_name='CustomBlooms').dropna(how="all")
+        for index, row in df_blooms.iterrows():
+            if pd.notna(row['Verb']) and pd.notna(row['Level']):
+                new_db['blooms'][str(row['Verb']).lower().strip()] = str(row['Level']).strip().upper()
+                
+        df_syl = pd.read_excel(uploaded_file, sheet_name='SyllabusMapping').dropna(how="all")
+        for index, row in df_syl.iterrows():
+            if pd.notna(row['Keyword']):
+                kw = str(row['Keyword']).lower().strip()
+                new_db['syllabus'][kw] = {
+                    "L1": str(row.get('L1', 'CO1')).strip(), "L2": str(row.get('L2', 'CO1')).strip(),
+                    "L3": str(row.get('L3', 'CO1')).strip(), "L4": str(row.get('L4', 'CO1')).strip(),
+                    "L5": str(row.get('L5', 'CO1')).strip(), "L6": str(row.get('L6', 'CO1')).strip()
+                }
+        
+        st.session_state.db = new_db
+        st.session_state.exam_details = new_db['course']
+        st.session_state.is_custom_db = True
+        return True
+    except Exception as e:
+        st.error(f"Error reading Excel file. Ensure you are using the official template. Error: {e}")
+        return False
 
 # --- 4. AUTO TAGGING ENGINE ---
 def auto_tag_question(text):
     if not text: return "L1", "CO1"
-    
-    suggested_lvl = "L1"
-    suggested_co = "CO1"
+    suggested_lvl, suggested_co = "L1", "CO1"
     text_lower = text.lower()
     
-    # 1. FIND BLOOM'S
     words = re.findall(r'\b[a-zA-Z-]+\b', text_lower)
     for word in words[:7]: 
-        if word in blooms_dict:
-            suggested_lvl = blooms_dict[word]
+        if word in st.session_state.db['blooms']:
+            suggested_lvl = st.session_state.db['blooms'][word]
             break
             
-    # 2. FIND CO
-    for keyword, level_rules in advanced_syllabus_mapping.items():
+    for keyword, level_rules in st.session_state.db['syllabus'].items():
         if re.search(r'\b' + re.escape(keyword) + r'\b', text_lower):
             suggested_co = level_rules.get(suggested_lvl, "CO1")
             break 
@@ -130,24 +142,16 @@ def generate_html():
     return html
 
 # --- STATE MANAGEMENT & CALLBACKS ---
-def load_course_setup():
-    cursor.execute("SELECT institution, course_code, course_name, max_marks, duration FROM course_setup WHERE id=1")
-    row = cursor.fetchone()
-    if row:
-        return {'institution': row[0], 'courseCode': row[1], 'courseName': row[2], 'maxMarks': row[3], 'duration': row[4]}
-    return {'institution': 'AMC Engineering College', 'courseCode': '1BESC104C', 'courseName': 'Intro to Electronics', 'maxMarks': 50, 'duration': '3 Hours'}
-
 if 'exam_details' not in st.session_state:
-    st.session_state.exam_details = load_course_setup()
+    st.session_state.exam_details = st.session_state.db['course']
 
 if 'sections' not in st.session_state:
     st.session_state.sections = [
         {'id': 100, 'module': 'Module 1', 'isNote': False, 'questions': [
-            {'id': 101, 'qNo': '', 'text': 'Define PN junction diode.', 'marks': 5, 'co': 'CO1', 'level': 'L1'}
+            {'id': 101, 'qNo': '', 'text': '', 'marks': 5, 'co': 'CO1', 'level': 'L1'}
         ]}
     ]
 
-# ADD Functions
 def add_section():
     new_id = int(datetime.datetime.now().timestamp() * 1000)
     current_modules = len(st.session_state.sections)
@@ -163,7 +167,6 @@ def add_sub_question(sec_idx):
         'id': new_id, 'qNo': '', 'text': '', 'marks': 0, 'co': 'CO1', 'level': 'L1'
     })
 
-# DELETE Functions
 def delete_section(sec_idx):
     st.session_state.sections.pop(sec_idx)
 
@@ -173,22 +176,85 @@ def delete_sub_question(sec_idx, q_idx):
 def update_tags(q_id, sec_idx, q_idx):
     typed_text = st.session_state[f"qt_{q_id}"]
     new_level, new_co = auto_tag_question(typed_text)
-    
     st.session_state[f"lv_{q_id}"] = new_level
     st.session_state[f"co_{q_id}"] = new_co
-    
     st.session_state.sections[sec_idx]['questions'][q_idx]['text'] = typed_text
     st.session_state.sections[sec_idx]['questions'][q_idx]['level'] = new_level
     st.session_state.sections[sec_idx]['questions'][q_idx]['co'] = new_co
+
+# --- DRAFT SAVE/LOAD LOGIC ---
+def export_draft_json():
+    draft_data = {
+        'exam_details': st.session_state.exam_details,
+        'sections': st.session_state.sections
+    }
+    return json.dumps(draft_data, indent=4)
+
+def load_draft_json(uploaded_draft):
+    try:
+        draft_data = json.load(uploaded_draft)
+        st.session_state.exam_details = draft_data['exam_details']
+        st.session_state.sections = draft_data['sections']
+        return True
+    except Exception as e:
+        st.error(f"Invalid draft file. Error: {e}")
+        return False
 
 
 # --- UI LAYOUT ---
 st.title("🎓 AMC Exam Portal Pro")
 
-# TWO TABS: The Editor, and the Setup Database
-tab_editor, tab_setup = st.tabs(["📝 Exam Paper Editor", "⚙️ Course & DB Setup"])
+tab_editor, tab_setup = st.tabs(["📝 Exam Paper Editor", "⚙️ Setup & Engine Configuration"])
+
+with tab_setup:
+    st.header("⚙️ Configure Intelligence Engine")
+    st.write("Customize the course details, Bloom's dictionary, and Syllabus mappings by uploading an Excel configuration file.")
+    col_dl, col_ul = st.columns(2)
+    with col_dl:
+        st.subheader("Step 1: Download Template")
+        excel_data = generate_excel_template()
+        st.download_button(label="📥 Download Excel Template", data=excel_data, file_name="AMC_Intelligence_Template.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary")
+    with col_ul:
+        st.subheader("Step 2: Upload Configuration")
+        uploaded_file = st.file_uploader("Upload Configured Excel", type=['xlsx'])
+        if uploaded_file is not None:
+            if load_excel_database(uploaded_file):
+                st.success("✅ Custom Database Loaded Successfully!")
+    st.divider()
+    if st.session_state.is_custom_db:
+        st.success("🧠 Currently running on: **Custom Uploaded Configuration**")
+    else:
+        st.info("🧠 Currently running on: **Default Baseline Configuration**")
 
 with tab_editor:
+    if not st.session_state.is_custom_db:
+        st.warning("⚠️ You are using the default database. Go to the Setup Tab to upload your specific Course Rules.")
+    
+    # --- SAVE / RESUME PROGRESS BAR ---
+    with st.expander("💾 Save / Resume Progress", expanded=False):
+        st.write("Need to take a break? Download your current draft and upload it later to resume exactly where you left off.")
+        c_save, c_load = st.columns(2)
+        
+        with c_save:
+            st.download_button(
+                label="📥 Download Current Draft (.json)",
+                data=export_draft_json(),
+                file_name=f"Draft_{st.session_state.exam_details['courseCode']}_Exam.json",
+                mime="application/json",
+                type="primary"
+            )
+            
+        with c_load:
+            draft_upload = st.file_uploader("📂 Upload Previous Draft (.json)", type=['json'], key="draft_up")
+            if draft_upload is not None:
+                if st.button("🔄 Resume Draft", type="primary"):
+                    if load_draft_json(draft_upload):
+                        st.success("Draft Loaded Successfully!")
+                        st.rerun()
+                        
+    st.divider()
+
+    # --- EDITOR UI ---
     col_edit, col_view = st.columns([1.2, 1], gap="large")
 
     with col_edit:
@@ -200,13 +266,10 @@ with tab_editor:
                 mod_idx = mod_options.index(current_mod) if current_mod in mod_options else 0
                 
                 section['module'] = mod_col.selectbox(f"Main Question {i+1} Assignment", mod_options, index=mod_idx, key=f"mod_sel_{section['id']}")
-                
-                # DELETE BLOCK BUTTON
                 del_blk_col.button("🗑️ Delete Block", key=f"del_blk_{section['id']}", on_click=delete_section, args=(i,), type="secondary")
                 
                 if not section.get('isNote'):
                     for j, q in enumerate(section['questions']):
-                        # Auto Numbering
                         computed_qno = f"{i+1}.{chr(97+j)}"
                         q['qNo'] = computed_qno 
                         
@@ -214,8 +277,6 @@ with tab_editor:
                         c_no, c_txt, c_del = st.columns([1, 5, 1])
                         c_no.text_input("Q.No", value=computed_qno, disabled=True, key=f"qn_{q['id']}")
                         c_txt.text_area("Question Text (Ctrl+Enter to auto-tag)", q['text'], key=f"qt_{q['id']}", on_change=update_tags, args=(q['id'], i, j))
-                        
-                        # DELETE SUB-QUESTION BUTTON
                         c_del.button("❌", key=f"del_sq_{q['id']}", on_click=delete_sub_question, args=(i, j), help="Delete this sub-question")
                         
                         c_mk, c_co, c_lvl = st.columns([2, 2, 2])
@@ -251,83 +312,4 @@ with tab_editor:
         st.header("👁️ Live Document Preview")
         html_content = generate_html()
         components.html(html_content, height=600, scrolling=True)
-        st.download_button(label="📥 Download HTML Template", data=html_content, file_name=f"{st.session_state.exam_details['courseCode']}_QP.html", mime="text/html", type="primary")
-
-# --- TAB 2: SETUP & DATABASE MANAGEMENT ---
-with tab_setup:
-    st.header("⚙️ System Database & Course Setup")
-    st.write("Save your local configurations here. Data is written to the local SQLite database.")
-    
-    # 1. Course Details Setup
-    with st.expander("📚 1. Course Profile Setup", expanded=True):
-        st.info("Update the exam header details here.")
-        with st.form("course_setup_form"):
-            i_inst = st.text_input("Institution", st.session_state.exam_details['institution'])
-            c1, c2 = st.columns(2)
-            i_code = c1.text_input("Course Code", st.session_state.exam_details['courseCode'])
-            i_name = c2.text_input("Course Name", st.session_state.exam_details['courseName'])
-            i_marks = c1.number_input("Max Marks", value=int(st.session_state.exam_details['maxMarks']))
-            i_dur = c2.text_input("Duration", st.session_state.exam_details['duration'])
-            
-            if st.form_submit_button("💾 Save Course Details to DB"):
-                cursor.execute("DELETE FROM course_setup")
-                cursor.execute("INSERT INTO course_setup (id, institution, course_code, course_name, max_marks, duration) VALUES (1, ?, ?, ?, ?, ?)", 
-                               (i_inst, i_code, i_name, i_marks, i_dur))
-                conn.commit()
-                # Update Session State
-                st.session_state.exam_details = {'institution': i_inst, 'courseCode': i_code, 'courseName': i_name, 'maxMarks': i_marks, 'duration': i_dur}
-                st.success("Course details saved to DB!")
-                st.rerun()
-
-    # 2. Bloom's Dictionary Editor
-    with st.expander("🧠 2. Bloom's Taxonomy Dictionary", expanded=False):
-        st.write("Add missing action verbs (e.g., UK spellings like 'analyse') to force the system to recognize them.")
-        with st.form("add_verb_form", clear_on_submit=True):
-            vc1, vc2, vc3 = st.columns([2, 1, 1])
-            new_verb = vc1.text_input("Action Verb (e.g. analyse)")
-            new_level = vc2.selectbox("Bloom's Level", ["L1", "L2", "L3", "L4", "L5", "L6"])
-            if vc3.form_submit_button("➕ Add to DB"):
-                if new_verb:
-                    cursor.execute("INSERT OR REPLACE INTO custom_blooms (verb, level) VALUES (?, ?)", (new_verb.lower().strip(), new_level))
-                    conn.commit()
-                    load_blooms_taxonomy.clear() # Clear cache to reload new DB values
-                    st.success(f"Added '{new_verb}' as {new_level}")
-        
-        # Show Current Custom Verbs
-        st.write("**Your Custom DB Verbs:**")
-        custom_verbs_df = pd.read_sql_query("SELECT * FROM custom_blooms", conn)
-        if not custom_verbs_df.empty:
-            st.dataframe(custom_verbs_df, use_container_width=True)
-        else:
-            st.caption("No custom verbs added yet.")
-
-    # 3. Keyword to CO Mapping Setup
-    with st.expander("🔗 3. Smart Syllabus (Keyword to CO) Mapping", expanded=False):
-        st.write("Map a syllabus phrase to specific COs based on the cognitive level. ")
-        with st.form("add_mapping_form", clear_on_submit=True):
-            new_phrase = st.text_input("Syllabus Phrase (e.g., 'number system', 'flip-flop')")
-            st.write("Assign the CO if this phrase is tested at the following levels:")
-            cc1, cc2, cc3, cc4, cc5, cc6 = st.columns(6)
-            co_options = ["CO1", "CO2", "CO3", "CO4", "CO5", "CO6"]
-            co_l1 = cc1.selectbox("If L1", co_options, key="cl1")
-            co_l2 = cc2.selectbox("If L2", co_options, key="cl2")
-            co_l3 = cc3.selectbox("If L3", co_options, key="cl3")
-            co_l4 = cc4.selectbox("If L4", co_options, key="cl4")
-            co_l5 = cc5.selectbox("If L5", co_options, key="cl5")
-            co_l6 = cc6.selectbox("If L6", co_options, key="cl6")
-            
-            if st.form_submit_button("➕ Map Phrase to DB"):
-                if new_phrase:
-                    rules = json.dumps({"L1": co_l1, "L2": co_l2, "L3": co_l3, "L4": co_l4, "L5": co_l5, "L6": co_l6})
-                    cursor.execute("INSERT OR REPLACE INTO co_mappings (keyword, rules) VALUES (?, ?)", (new_phrase.lower().strip(), rules))
-                    conn.commit()
-                    load_syllabus_mapping.clear() # Clear cache
-                    st.success(f"Mapped '{new_phrase}' successfully!")
-                    
-        # Show Current Mappings
-        st.write("**Your Custom DB Mappings:**")
-        custom_mappings_df = pd.read_sql_query("SELECT * FROM co_mappings", conn)
-        if not custom_mappings_df.empty:
-            st.dataframe(custom_mappings_df, use_container_width=True)
-        else:
-            st.caption("No custom mappings added yet.")
+        st.download_button(label="📥 Finalize & Download HTML", data=html_content, file_name=f"{st.session_state.exam_details['courseCode']}_QP.html", mime="text/html", type="primary")
